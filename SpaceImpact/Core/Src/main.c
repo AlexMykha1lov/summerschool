@@ -36,6 +36,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define BULLETS_MAX_NUM 30
+#define MOBS_MAX_NUM 3
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -48,6 +49,8 @@
 ADC_HandleTypeDef hadc1;
 
 SPI_HandleTypeDef hspi1;
+
+TIM_HandleTypeDef htim9;
 
 /* Definitions for Draw */
 osThreadId_t DrawHandle;
@@ -73,10 +76,18 @@ const osMutexAttr_t MTX1_attributes = {
 typedef struct {
     uint8_t x;
     uint8_t y;
-    struct queue *nextBullet;
+    struct queue *nextElem;
 } queue;
-queue *startPtr = NULL, *endPtr = NULL;
-int32_t crntFrame = 0;
+
+typedef struct {
+	queue *startPtr;
+	queue *endPtr;
+	int8_t cntrElem;
+	int8_t maxItemNum;
+} item_t;
+item_t bullets;
+item_t mobs;
+
 
 uint32_t adc_value;
 uint16_t adc_prev_value;
@@ -87,6 +98,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_SPI1_Init(void);
+static void MX_TIM9_Init(void);
 void StartDraw(void *argument);
 void StartControl(void *argument);
 
@@ -95,6 +107,9 @@ void addQueueFrame();
 void delQueueFrame();
 void protagonistDraw();
 void bulletDraw();
+void mobDraw();
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -109,7 +124,7 @@ void bulletDraw();
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-
+  srand(time(NULL));
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -132,8 +147,19 @@ int main(void)
   MX_GPIO_Init();
   MX_ADC1_Init();
   MX_SPI1_Init();
+  MX_TIM9_Init();
   /* USER CODE BEGIN 2 */
+  bullets.startPtr = NULL;
+  bullets.endPtr = NULL;
+  bullets.cntrElem = 0;
+  bullets.maxItemNum = BULLETS_MAX_NUM;
 
+  mobs.startPtr = NULL;
+  mobs.endPtr = NULL;
+  mobs.cntrElem = 0;
+  mobs.maxItemNum = MOBS_MAX_NUM;
+
+  HAL_TIM_Base_Start_IT(&htim9);
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -324,6 +350,44 @@ static void MX_SPI1_Init(void)
 }
 
 /**
+  * @brief TIM9 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM9_Init(void)
+{
+
+  /* USER CODE BEGIN TIM9_Init 0 */
+
+  /* USER CODE END TIM9_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+
+  /* USER CODE BEGIN TIM9_Init 1 */
+
+  /* USER CODE END TIM9_Init 1 */
+  htim9.Instance = TIM9;
+  htim9.Init.Prescaler = 42000;
+  htim9.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim9.Init.Period = 3000;
+  htim9.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim9.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_Base_Init(&htim9) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim9, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM9_Init 2 */
+
+  /* USER CODE END TIM9_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -338,7 +402,10 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, LCD_RESET_Pin|LCD_CS_Pin|LCD_A0_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(LCD_RESET_GPIO_Port, LCD_RESET_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, LCD_CS_Pin|LCD_A0_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pins : LCD_RESET_Pin LCD_CS_Pin LCD_A0_Pin */
   GPIO_InitStruct.Pin = LCD_RESET_Pin|LCD_CS_Pin|LCD_A0_Pin;
@@ -360,34 +427,38 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void addQueueFrame()
+/*
+ * rand() function doesnt work right
+ *
+ * */
+void addQueueFrame(item_t *Item)
 {
-    if (crntFrame < BULLETS_MAX_NUM)
+    if (Item->cntrElem < Item->maxItemNum)
     {
-        queue *buf = endPtr;
-        endPtr = (endPtr == NULL)  ?  (startPtr = (queue *)malloc(sizeof(queue)))  :  (queue *)(endPtr->nextBullet = (struct queue *)malloc(sizeof(queue)));
-        if (endPtr)
-            crntFrame++;
-        else
-            endPtr = buf;
+        queue *buf = (queue *)malloc(sizeof(queue));
+        if(buf) {
+        	Item->endPtr = (Item->endPtr == NULL)  ?  (Item->startPtr = buf)  :  (queue *)(Item->endPtr->nextElem = (struct queue *)buf);
+        	Item->endPtr->nextElem = NULL;
+        	Item->cntrElem++;
+        }
     }
 }
 
-void delQueueFrame()
+void delQueueFrame(item_t *Item)
 {
-    if (crntFrame > 0 && startPtr != NULL)
+    if (Item->cntrElem > 0 && Item->startPtr != NULL)
     {
-        queue *buf = startPtr;
-        startPtr = (queue *)startPtr->nextBullet;
+        queue *buf = Item->startPtr;
+        Item->startPtr = (queue *)Item->startPtr->nextElem;
         free(buf);
-        if (--crntFrame == 0)
-            endPtr = startPtr = NULL;
+        if (--(Item->cntrElem) == 0)
+            Item->endPtr = Item->startPtr = NULL;
     }
 }
 
 void protagonistDraw()
 {
-	if(POSITION(adc_value) != POSITION(adc_prev_value)) {					// flicker reduction
+	if(POSITION(adc_value) != POSITION(adc_prev_value)) {					// motionless protagonist figure flicker reduction
 			osMutexAcquire(MTX1Handle, osWaitForever);
 			lcd_fill_rect( 3, POSITION(adc_prev_value), 14, 20, ST7735_BLACK);
 			lcd_fill_rect( 3, POSITION(adc_value),       5, 20, ST7735_CYAN);
@@ -400,26 +471,48 @@ void protagonistDraw()
 
 void bulletDraw()
 {
-	for(queue *buffer = startPtr; buffer != NULL; buffer = (queue*)(buffer->nextBullet)) {
-		if((buffer->x + 5) < 128) {
+	for(queue *buffer = bullets.startPtr; buffer != NULL; buffer = (queue*)(buffer->nextElem)) {
+		if((buffer->x + 5) < 127) {
 			lcd_fill_rect(buffer->x++, buffer->y, 5, 2, ST7735_BLACK);
 			lcd_fill_rect(buffer->x,   buffer->y, 5, 2, ST7735_GREEN);
 		} else {
 			lcd_fill_rect(buffer->x, buffer->y, 5, 2, ST7735_BLACK);
-			delQueueFrame();
+			delQueueFrame(&bullets);
 			break;
 		}
 	}
 }
 
+void mobDraw()
+{
+	//static uint8_t movDir = 1;
+	for(queue *buffer = mobs.startPtr; buffer != NULL; buffer = (queue*)(buffer->nextElem)) {
+		lcd_line(buffer->x - 5, buffer->y - 5, buffer->x + 5, buffer->y + 5, ST7735_RED);
+		lcd_line(buffer->x + 5, buffer->y - 5, buffer->x - 5, buffer->y + 5, ST7735_RED);
+		lcd_fill_circle(buffer->x, buffer->y, 5, ST7735_RED);
+	}
+}
+
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-	addQueueFrame();
-	if(endPtr != NULL) {
-		endPtr->x = 14;
-		endPtr->y = POSITION(adc_prev_value) + 9;
-		endPtr->nextBullet = NULL;
+	addQueueFrame(&bullets);
+	if(bullets.endPtr != NULL) {
+		bullets.endPtr->x = 14;
+		bullets.endPtr->y = POSITION(adc_prev_value) + 9;		// !
 	}
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
+{
+	if(htim != &htim9)
+			return;
+	addQueueFrame(&mobs);
+	if(mobs.endPtr != NULL) {
+		mobs.endPtr->x = 117;				// x,y - mob`s center coordinates
+		mobs.endPtr->y = rand() % 154 + 5;
+	}
+	__HAL_TIM_SET_AUTORELOAD(&htim9, rand() % 8000 + 2000);
+	__HAL_TIM_SET_COUNTER(&htim9, 0);
 }
 /* USER CODE END 4 */
 
@@ -443,6 +536,7 @@ void StartDraw(void *argument)
   {
 	protagonistDraw();
 	bulletDraw();
+	mobDraw();
 
     osDelay(FPS_TO_TICKS(60));
   }

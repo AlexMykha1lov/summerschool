@@ -59,7 +59,7 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define CONTROL_POT_Pin GPIO_PIN_0
 #define CONTROL_POT_GPIO_Port GPIOA
-#define LCD_RESET_Pin GPIO_PIN_3
+#define LCD_RESET_Pin GPIO_PIN_1
 #define LCD_RESET_GPIO_Port GPIOA
 #define LCD_CS_Pin GPIO_PIN_4
 #define LCD_CS_GPIO_Port GPIOA
