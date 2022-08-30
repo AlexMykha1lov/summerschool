@@ -90,12 +90,8 @@ item_t bullets;
 item_t mobs;
 
 
-uint32_t adc_value;
+uint16_t adc_value;
 uint16_t adc_prev_value;
-
-
-
-uint8_t flag = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -436,17 +432,13 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-/*
- * rand() function doesnt work right
- *
- * */
 uint8_t addQueueFrame(item_t *Item)
 {
     if (Item->cntrElem < Item->maxItemNum)
     {
         queue *nextBuf = (queue *)malloc(sizeof(queue));
-        queue *prevBuf = Item->endPtr;
         if(nextBuf) {
+          queue *prevBuf = Item->endPtr;
           Item->endPtr = (Item->endPtr == NULL)  ?  (Item->startPtr = nextBuf)  :  (queue *)(Item->endPtr->nextElem = (struct queue *)nextBuf);
           Item->endPtr->nextElem = NULL;
           Item->endPtr->prevElem = (struct queue *)prevBuf;
@@ -495,6 +487,10 @@ void protagonistDraw()
 
 void bulletDraw()
 {
+/* Bullet dimensions:
+ * X: 5px.
+ * Y: 2px.
+ * */
 	for(queue *buffer = bullets.startPtr; buffer != NULL; buffer = (queue*)(buffer->nextElem)) {
 		if((buffer->x + 5) < 127) {
 			lcd_fill_rect(buffer->x++, buffer->y, 5, 2, ST7735_BLACK);
@@ -508,6 +504,10 @@ void bulletDraw()
 
 void mobDraw()
 {
+/* Mob dimensions:
+ * X: 10px.
+ * Y: 10px.
+ * */
 	for(queue *buffer = mobs.startPtr; buffer != NULL; buffer = (queue*)(buffer->nextElem)) {
 			lcd_line(buffer->x - 5, buffer->y - 5, buffer->x + 5, buffer->y + 5, ST7735_RED);
 			lcd_line(buffer->x + 5, buffer->y - 5, buffer->x - 5, buffer->y + 5, ST7735_RED);
@@ -517,13 +517,13 @@ void mobDraw()
 
 void collisionFinder()
 {
-	for(queue *bulletBuffer = bullets.startPtr; bulletBuffer != NULL && bulletBuffer->x > TERMINAL_XLINE && bulletBuffer->x < TERMINAL_XLINE + 10; bulletBuffer = (queue*)(bulletBuffer->nextElem))
-		for (queue *mobBuffer = mobs.startPtr; mobBuffer != NULL; mobBuffer = (queue*)(mobBuffer->nextElem))
-			if ((bulletBuffer->y < mobBuffer->y + 5 && bulletBuffer->y > mobBuffer->y - 5) || (bulletBuffer->y + 2 > mobBuffer->y - 5 && bulletBuffer->y + 2 < mobBuffer->y + 5)) {
-				lcd_fill_rect(bulletBuffer->x, bulletBuffer->y, 5, 2, ST7735_BLACK);
-				delQueueFrame(&bullets, bulletBuffer);
-				lcd_fill_rect(mobBuffer->x - 5, mobBuffer->y - 5, 10, 10, ST7735_BLACK);
-				delQueueFrame(&mobs, mobBuffer);
+	for(queue *bullet = bullets.startPtr; bullet != NULL && bullet->x > TERMINAL_XLINE && bullet->x < TERMINAL_XLINE + 10; bullet = (queue*)(bullet->nextElem))
+		for (queue *mob = mobs.startPtr; mob != NULL; mob = (queue*)(mob->nextElem))
+			if ((bullet->y < mob->y + 5 && bullet->y > mob->y - 5) || (bullet->y + 2 > mob->y - 5 && bullet->y + 2 < mob->y + 5)) {
+				lcd_fill_rect(bullet->x, bullet->y, 5, 2, ST7735_BLACK);
+				delQueueFrame(&bullets, bullet);
+				lcd_fill_rect(mob->x - 5, mob->y - 5, 11, 11, ST7735_BLACK);
+				delQueueFrame(&mobs, mob);
 			}
 }
 
@@ -531,7 +531,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 	if(!addQueueFrame(&bullets)) {
 		bullets.endPtr->x = 14;
-		bullets.endPtr->y = POSITION(adc_prev_value) + 9;		// !
+		bullets.endPtr->y = POSITION(adc_prev_value) + 9;		// ?
 	}
 }
 
@@ -542,20 +542,21 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 
 	if(!addQueueFrame(&mobs)) {
 		mobs.endPtr->x = 117;				// x,y - mob`s center coordinates
-		mobs.endPtr->y = POSITION(rand());
+		mobs.endPtr->y = rand() % 139 + 10;
 
-		uint8_t cntr = 0;
-
-		for(queue *buffer = mobs.startPtr; buffer->nextElem != NULL; buffer = (queue*)(buffer->nextElem))
-			if((mobs.endPtr->y - 5 <= buffer->y + 6 && mobs.endPtr->y - 5 >= buffer->y - 6) || (mobs.endPtr->y + 5 <= buffer->y + 6 && mobs.endPtr->y + 5 <= buffer->y - 6)){
-				mobs.endPtr->y = POSITION(rand());
+		for(queue *buffer = mobs.startPtr; buffer->nextElem != NULL; buffer = (queue*)(buffer->nextElem)) {
+			uint8_t newMobL = mobs.endPtr->y - 6;		// new mob`s left  side Y-coordinate + 1px. gap
+			uint8_t newMobR = mobs.endPtr->y + 6;		// new mob`s right side Y-coordinate + 1px. gap
+			uint8_t oldMobL = buffer->y - 6;
+			uint8_t oldMobR = buffer->y + 6;
+			if((newMobL >= oldMobL && newMobL <= oldMobR) || (newMobR >= oldMobL && newMobR <= oldMobR)) {
+				mobs.endPtr->y = rand() % 139 + 10;
 				buffer = mobs.startPtr;
-				lcd_char(50, 0, (char)((cntr %= 10) + 48), ST7735_WHITE, ST7735_BLACK, 1, 1);
-				cntr++;
 			}
+		}
 
 	}
-	__HAL_TIM_SET_AUTORELOAD(&htim9, rand() % 8000 + 2000);
+	__HAL_TIM_SET_AUTORELOAD(&htim9, rand() % 8000 + 2000);		// spawn of the next mob in the time range of 1-5 seconds
 	__HAL_TIM_SET_COUNTER(&htim9, 0);
 }
 /* USER CODE END 4 */
@@ -574,7 +575,7 @@ void StartDraw(void *argument)
 	  while(1){}
 	lcd_fill(ST7735_BLACK);
 	adc_value = 2048;
-	adc_prev_value = adc_value + 1024;		// adc_prev_value != adc_prev_value at first
+	adc_prev_value = adc_value + 1024;		// adc_prev_value != adc_value at first
   /* Infinite loop */
   for(;;)
   {
